@@ -1,0 +1,114 @@
+:root {
+  --ui-bg: #0b0d12;
+  --ui-panel: rgba(255, 255, 255, 0.03);
+  --ui-fg: rgba(255, 255, 255, 0.92);
+  --ui-muted: rgba(255, 255, 255, 0.62);
+  --ui-border: rgba(255, 255, 255, 0.10);
+
+  --ui-accent: #7c3aed;
+  --ui-accent-2: #06b6d4;
+
+  --ui-danger: #ff4d6d;
+
+  --ui-font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+    "Segoe UI Emoji";
+  --ui-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  color-scheme: dark;
+  font-family: var(--ui-font);
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --ui-bg: #f7f8fc;
+    --ui-panel: rgba(0, 0, 0, 0.03);
+    --ui-fg: rgba(10, 12, 18, 0.92);
+    --ui-muted: rgba(10, 12, 18, 0.58);
+    --ui-border: rgba(10, 12, 18, 0.10);
+    color-scheme: light;
+  }
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 520px at 20% -10%, rgba(124, 58, 237, 0.26), transparent 55%),
+    radial-gradient(900px 520px at 100% 0%, rgba(6, 182, 212, 0.20), transparent 50%),
+    radial-gradient(700px 520px at 40% 120%, rgba(124, 58, 237, 0.14), transparent 55%),
+    var(--ui-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#app {
+  min-height: 100svh;
+  width: 980px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+input {
+  font: inherit;
+}
+
+input[type='text'],
+input[type='number'],
+input:not([type]) {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--ui-border);
+  color: inherit;
+  border-radius: 14px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+input:focus {
+  border-color: rgba(124, 58, 237, 0.45);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.16);
+}
+
+.btn {
+  border: 1px solid var(--ui-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 10px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  transition: transform 0.08s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn.primary {
+  border-color: rgba(124, 58, 237, 0.35);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.38), rgba(6, 182, 212, 0.22));
+}
+
+.btn.danger {
+  border-color: rgba(255, 77, 109, 0.30);
+  background: rgba(255, 77, 109, 0.14);
+}
