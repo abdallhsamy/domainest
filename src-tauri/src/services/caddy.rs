@@ -14,8 +14,8 @@ use crate::{
     paths,
 };
 
-const GENERATED_BEGIN: &str = "# --- BEGIN dev-domains managed ---";
-const GENERATED_END: &str = "# --- END dev-domains managed ---";
+const GENERATED_BEGIN: &str = "# --- BEGIN domainest managed ---";
+const GENERATED_END: &str = "# --- END domainest managed ---";
 const ADMIN_ADDR: &str = "127.0.0.1:2019";
 
 pub struct CaddyManager {
@@ -30,7 +30,7 @@ impl CaddyManager {
     }
 
     pub fn caddyfile_path() -> AppResult<PathBuf> {
-        Ok(paths::dev_domains_dir()?.join("Caddyfile"))
+        Ok(paths::domainest_dir()?.join("Caddyfile"))
     }
 
     pub fn write_managed_caddyfile(

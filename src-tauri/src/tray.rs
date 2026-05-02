@@ -14,7 +14,7 @@ use crate::{
 use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 
-const TRAY_ID: &str = "dev-domains-tray";
+const TRAY_ID: &str = "domainest-tray";
 
 pub fn init_tray(app: &tauri::App, projects: &[Project]) -> tauri::Result<()> {
     let menu = build_menu(app.handle(), projects)?;
