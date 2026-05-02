@@ -52,6 +52,18 @@ jobs:
             librsvg2-dev \
             patchelf
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:deps
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
