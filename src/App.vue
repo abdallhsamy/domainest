@@ -346,7 +346,7 @@ async function saveSuffix() {
         <div class="modalTop">
           <div>
             <div class="modalTitle">Logs · {{ logViewer.projectName }}</div>
-            <div class="modalHint">Live tail from `~/.dev-domains/logs/{{ logViewer.projectId }}.log`</div>
+            <div class="modalHint">Live tail from `~/.domainest/logs/{{ logViewer.projectId }}.log`</div>
           </div>
           <div class="modalActions">
             <button class="btn" @click="refreshLogs" :disabled="logViewer.loading">Refresh</button>

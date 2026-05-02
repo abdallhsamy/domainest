@@ -34,7 +34,7 @@ It’s built with **Tauri (Rust)** + **Vue 3 (Vite)**, and ships a fully local s
 
 1. **DNS**: your chosen suffix (default `test`) resolves to `127.0.0.1`.
 2. **Caddy**: routes `https://<domain>` → `http://localhost:<port>` for each running project.
-3. **mkcert**: generates & reuses certs at `~/.dev-domains/certs/<domain>.pem`.
+3. **mkcert**: generates & reuses certs at `~/.domainest/certs/<domain>.pem`.
 4. **Dev server**: Domainest spawns your configured command (default `pnpm dev`) in the project directory.
 
 ## Requirements
@@ -50,6 +50,12 @@ Install dependencies:
 
 ```bash
 pnpm install
+```
+
+Optional — use the repo’s Git hooks so `cargo fmt --check` runs before each commit (matches CI; no extra npm packages):
+
+```bash
+git config core.hooksPath .githooks
 ```
 
 Download bundled sidecars:
@@ -92,7 +98,7 @@ Default values:
 ### View logs (“terminal”)
 
 - For running projects, click **Logs** on the project card.
-- Logs are read from: `~/.dev-domains/logs/<project-id>.log`
+- Logs are read from: `~/.domainest/logs/<project-id>.log`
 
 ### Change suffix / TLD
 
@@ -111,12 +117,14 @@ Important notes:
 
 ## Data locations
 
-- **Projects**: `~/.dev-domains/projects.json`
-- **App state** (mkcert installed, suffix, etc.): `~/.dev-domains/state.json`
-- **Certificates**: `~/.dev-domains/certs/`
-- **Logs**: `~/.dev-domains/logs/`
-- **Caddy runtime**: `~/.dev-domains/caddy/`
-- **Caddyfile**: `~/.dev-domains/Caddyfile`
+If you used an older build that stored data under `~/.dev-domains`, copy or move that folder to `~/.domainest` (or re-add projects in the app).
+
+- **Projects**: `~/.domainest/projects.json`
+- **App state** (mkcert installed, suffix, etc.): `~/.domainest/state.json`
+- **Certificates**: `~/.domainest/certs/`
+- **Logs**: `~/.domainest/logs/`
+- **Caddy runtime**: `~/.domainest/caddy/`
+- **Caddyfile**: `~/.domainest/Caddyfile`
 
 ## Troubleshooting
 
@@ -150,12 +158,12 @@ port 53535
 
 ### HTTPS certificate issues
 
-- Certs live in `~/.dev-domains/certs/`
+- Certs live in `~/.domainest/certs/`
 - First run performs `mkcert -install` (idempotent)
 
 ### Stale routes after crashes
 
-Domainest rewrites the managed block in `~/.dev-domains/Caddyfile` and reloads Caddy on startup and project state changes.
+Domainest rewrites the managed block in `~/.domainest/Caddyfile` and reloads Caddy on startup and project state changes.
 
 ## Project structure
 

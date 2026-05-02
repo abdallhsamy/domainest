@@ -12,7 +12,7 @@ impl DnsmasqManager {
         let dir = paths::dnsmasq_dir()?;
         fs::create_dir_all(&dir)?;
 
-        let path = dir.join("dev-domains.conf");
+        let path = dir.join("domainest.conf");
         let contents = [
             &format!(
                 "address=/.{}/127.0.0.1",
