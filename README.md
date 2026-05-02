@@ -52,6 +52,12 @@ Install dependencies:
 pnpm install
 ```
 
+Optional — use the repo’s Git hooks so `cargo fmt --check` runs before each commit (matches CI; no extra npm packages):
+
+```bash
+git config core.hooksPath .githooks
+```
+
 Download bundled sidecars:
 
 ```bash

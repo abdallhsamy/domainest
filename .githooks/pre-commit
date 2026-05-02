@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -e
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [ ! -f src-tauri/Cargo.toml ]; then
+  exit 0
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "pre-commit: cargo not found; install Rust or skip hooks (unset core.hooksPath)" >&2
+  exit 1
+fi
+
+echo "pre-commit: cargo fmt --check (src-tauri)..."
+cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
