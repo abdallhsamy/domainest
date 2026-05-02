@@ -31,9 +31,38 @@ jobs:
 
   rust:
     name: Rust (fmt + clippy + test)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Tauri / GTK / GLib)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:deps
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,6 +91,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            pkg-config \
+            libglib2.0-dev \
+            libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
@@ -91,7 +123,7 @@ jobs:
       - run: pnpm setup:deps
       - run: pnpm build
       - name: tauri build (deb only on CI to avoid AppImage tooling)
-        run: pnpm exec tauri build -- --bundles deb
+        run: pnpm exec tauri build --bundles deb --ci
 
       - uses: actions/upload-artifact@v4
         with:
