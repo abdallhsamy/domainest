@@ -47,8 +47,10 @@ fn build_menu(app: &AppHandle, projects: &[Project]) -> tauri::Result<Menu<tauri
 
   let projects_item = MenuItem::with_id(app, "nav_projects", "Projects", true, None::<&str>)?;
   let settings_item = MenuItem::with_id(app, "nav_settings", "Settings", true, None::<&str>)?;
+  let about_item = MenuItem::with_id(app, "nav_about", "About", true, None::<&str>)?;
   menu.append(&projects_item)?;
   menu.append(&settings_item)?;
+  menu.append(&about_item)?;
   menu.append(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
 
   for p in projects {
@@ -103,6 +105,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
     "nav_settings" => {
       let _ = open_or_focus_dashboard(app);
       let _ = app.emit("ui:navigate", "settings");
+    }
+    "nav_about" => {
+      let _ = open_or_focus_dashboard(app);
+      let _ = app.emit("ui:navigate", "about");
     }
     "add_project" => {
       let _ = open_or_focus_dashboard(app);

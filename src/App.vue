@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { listen } from '@tauri-apps/api/event'
 
 import type { Project } from './types/project'
 import { projectsService, settingsService } from './services/projectsService'
 
-type ViewKey = 'projects' | 'settings'
+type ViewKey = 'projects' | 'settings' | 'about'
+
+const AUTHOR_NAME = 'Abdallah Samy'
+const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/abdallah-samy'
+const AUTHOR_GITHUB_REPO = 'https://github.com/abdallhsamy/domainest'
 
 const state = reactive({
   loading: false,
@@ -126,6 +131,14 @@ async function updateArgsFromEvent(p: Project, e: Event) {
   await save(p)
 }
 
+async function openExternal(url: string) {
+  try {
+    await openUrl(url)
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+}
+
 onMounted(async () => {
   await refresh()
   try {
@@ -135,7 +148,9 @@ onMounted(async () => {
   }
   await listen<string>('ui:navigate', (e) => {
     const next = (e.payload ?? '').toLowerCase()
-    activeView.value = next === 'settings' ? 'settings' : 'projects'
+    if (next === 'settings') activeView.value = 'settings'
+    else if (next === 'about') activeView.value = 'about'
+    else activeView.value = 'projects'
   })
   await listen('ui:add_project', () => {
     activeView.value = 'projects'
@@ -176,6 +191,9 @@ async function saveSuffix() {
           </button>
           <button class="segmentedBtn" :class="{ active: activeView === 'settings' }" @click="activeView = 'settings'">
             Settings
+          </button>
+          <button class="segmentedBtn" :class="{ active: activeView === 'about' }" @click="activeView = 'about'">
+            About
           </button>
         </nav>
 
@@ -257,6 +275,32 @@ async function saveSuffix() {
               </label>
             </div>
           </article>
+        </div>
+      </section>
+
+      <section v-if="!state.loading && activeView === 'about'" class="about">
+        <div class="sectionHeader">
+          <div class="sectionTitle">About</div>
+          <div class="sectionHint">Domainest — local HTTPS domains and dev server orchestration.</div>
+        </div>
+
+        <div class="card aboutCard">
+          <div class="aboutAvatar" aria-hidden="true">AS</div>
+          <div class="aboutBody">
+            <div class="aboutName">{{ AUTHOR_NAME }}</div>
+            <div class="aboutRole">Author</div>
+            <p class="aboutBio">
+              Built to make local development feel like production: friendly domains, trusted TLS, and a tray-first workflow.
+            </p>
+            <div class="aboutLinks">
+              <button type="button" class="btn primary" @click="openExternal(AUTHOR_LINKEDIN)">LinkedIn</button>
+              <button type="button" class="btn" @click="openExternal(AUTHOR_GITHUB_REPO)">GitHub repository</button>
+            </div>
+            <div class="aboutUrls muted">
+              <div>{{ AUTHOR_LINKEDIN }}</div>
+              <div>{{ AUTHOR_GITHUB_REPO }}</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -579,6 +623,61 @@ async function saveSuffix() {
   margin-top: 8px;
   color: rgba(245, 158, 11, 0.95);
   font-size: 12px;
+}
+
+.aboutCard {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 20px;
+}
+.aboutAvatar {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 850;
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.45), rgba(6, 182, 212, 0.35));
+  border: 1px solid var(--ui-border);
+}
+.aboutBody {
+  min-width: 0;
+  flex: 1;
+}
+.aboutName {
+  font-size: 20px;
+  font-weight: 850;
+  letter-spacing: -0.03em;
+}
+.aboutRole {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ui-muted);
+  font-weight: 650;
+}
+.aboutBio {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ui-muted);
+  max-width: 62ch;
+}
+.aboutLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.aboutUrls {
+  margin-top: 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 .modalBackdrop {
