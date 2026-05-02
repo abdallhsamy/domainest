@@ -123,7 +123,7 @@ jobs:
       - run: pnpm setup:deps
       - run: pnpm build
       - name: tauri build (deb only on CI to avoid AppImage tooling)
-        run: pnpm exec tauri build -- --bundles deb
+        run: pnpm exec tauri build --bundles deb --ci
 
       - uses: actions/upload-artifact@v4
         with:
