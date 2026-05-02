@@ -131,3 +131,38 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
+
+  tauri-macos:
+    name: Tauri bundle (macOS .dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm setup:deps
+      - run: pnpm build
+
+      - name: tauri build (DMG)
+        run: pnpm exec tauri build --bundles dmg --ci
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: domainest-macos-dmg-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
