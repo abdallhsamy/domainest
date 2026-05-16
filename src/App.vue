@@ -165,9 +165,6 @@ async function saveSuffix() {
   try {
     const next = await settingsService.setDomainSuffix(domainSuffix.value)
     domainSuffix.value = next
-    if (next === 'dev' || next === 'app' || next === 'local') {
-      suffixState.warning = `.${next} can be problematic (HSTS or mDNS). Prefer .test unless you know the trade-offs.`
-    }
   } catch (e) {
     suffixState.error = String(e)
   } finally {
@@ -313,12 +310,12 @@ async function saveSuffix() {
         <div class="card">
           <div class="settingsGrid">
             <div class="setting">
-              <div class="settingTitle">Domain suffix (TLD)</div>
+              <div class="settingTitle">DNS zone</div>
               <div class="settingHint">
-                New projects default to `name.&lt;suffix&gt;`. DNS routing is configured for the selected suffix on this machine.
+                New projects use <code>name.&lt;zone&gt;</code>. Use <code>test</code> or <code>myapp</code>, or a subdomain you control (e.g. <code>myapp.com</code> → only <code>*.myapp.com</code> goes local; other <code>.com</code> sites are unchanged). Do not use a single label like <code>dev</code> or <code>com</code>.
               </div>
               <div class="settingRow">
-                <input v-model="domainSuffix" placeholder="test" spellcheck="false" />
+                <input v-model="domainSuffix" placeholder="test or myapp.com" spellcheck="false" />
                 <button class="btn primary" @click="saveSuffix" :disabled="suffixState.saving">Save</button>
               </div>
               <div v-if="suffixState.error" class="settingError">{{ suffixState.error }}</div>
@@ -333,8 +330,8 @@ async function saveSuffix() {
               <div class="settingHint">Certificates are generated per-domain when HTTPS is enabled.</div>
             </div>
             <div class="setting">
-              <div class="settingTitle">DNS for `.test`</div>
-              <div class="settingHint">Embedded DNS answers `*.&lt;suffix&gt;` to `127.0.0.1` (macOS uses port 53535).</div>
+              <div class="settingTitle">Local DNS</div>
+              <div class="settingHint">macOS sends only your zone to Domainest (<code>/etc/resolver/&lt;zone&gt;</code> → 127.0.0.1:53535).</div>
             </div>
           </div>
         </div>

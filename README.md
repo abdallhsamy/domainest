@@ -100,20 +100,25 @@ Default values:
 - For running projects, click **Logs** on the project card.
 - Logs are read from: `~/.domainest/logs/<project-id>.log`
 
-### Change suffix / TLD
+### Change DNS zone
 
-Open **Settings → Domain suffix (TLD)**.
+Open **Settings → DNS zone**.
 
-- Examples: `test`, `local`, `dev`, `app` (you can type with or without the dot)
-- Domainest configures:
-  - embedded DNS matching `*.suffix`
-  - macOS resolver file `/etc/resolver/<suffix>`
-  - new projects default domain `name.<suffix>`
+macOS **split-DNS** only sends queries for the zone you configure to Domainest:
 
-Important notes:
+| Zone you set | Resolver file | What resolves locally | What stays on normal DNS |
+|--------------|---------------|------------------------|---------------------------|
+| `test` | `/etc/resolver/test` | `*.test` (e.g. `app.test`) | N/A (`.test` is for testing) |
+| `myapp.com` | `/etc/resolver/myapp.com` | `*.myapp.com` only | `github.com`, `google.com`, etc. |
 
-- **`.dev` and `.app`** are real TLDs and may be **HSTS-preloaded**, which can make HTTP workflows painful.
-- **`.local`** is often used by **mDNS** and may behave differently than `.test`.
+- Examples: `test`, `myapp`, `myapp.com` (with or without a leading dot)
+- New projects default to `name.<zone>` (e.g. `api.myapp.com` when the zone is `myapp.com`)
+
+**Blocked as global zone:** single-label `dev`, `com`, `app`, etc. (they hijack the whole TLD).
+
+**Per-project `.dev` names** (e.g. `be-brand.dev` while the zone stays `test`): Domainest installs `/etc/resolver/be-brand.dev` so only that hostname uses local DNS; `github.dev` and other real `.dev` sites are unaffected.
+
+On startup, Domainest removes stale `/etc/resolver/*` files that point at its DNS (127.0.0.1:53535) except for your active zone.
 
 ## Data locations
 
@@ -140,6 +145,15 @@ If you changed your dev command manually, ensure it honors:
 
 - `-- --port <port>` (for Vite/Nuxt/etc)
 - or `PORT=<port>` env
+
+### Real `.dev` / `.app` sites stopped working
+
+Usually caused by an old `/etc/resolver/dev` (or similar) from a previous suffix. Domainest now blocks those suffixes and prunes leftover resolver files on launch. You can also remove them manually:
+
+```bash
+sudo rm /etc/resolver/dev /etc/resolver/app /etc/resolver/local
+sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder
+```
 
 ### DNS doesn’t resolve `*.suffix`
 
