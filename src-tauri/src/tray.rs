@@ -6,11 +6,7 @@ use tauri::{
 use uuid::Uuid;
 
 use crate::models::Project;
-use crate::{
-    paths,
-    services::{dnsmasq::DnsmasqManager, mkcert::MkcertManager},
-    AppState,
-};
+use crate::{paths, services::mkcert::MkcertManager, AppState};
 use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 
@@ -154,12 +150,7 @@ fn tray_start_project(app: &AppHandle, project_id: Uuid) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let suffix = state
-            .state_store
-            .read()
-            .map(|s| s.domain_suffix)
-            .unwrap_or_else(|_| "test".to_string());
-        let _ = DnsmasqManager::setup_system(&suffix);
+        let _ = crate::sync_dns(&state);
         let _ = MkcertManager::install_local_ca(&app, &state.state_store);
 
         let mut projects = match state.store.list_projects() {

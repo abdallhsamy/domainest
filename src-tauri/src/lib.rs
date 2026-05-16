@@ -1,4 +1,5 @@
 mod app_state;
+mod domain_suffix;
 mod error;
 mod models;
 mod paths;
@@ -20,21 +21,20 @@ use store::Store;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
-fn normalize_suffix(raw: &str) -> Result<String, String> {
-    let s = raw.trim().trim_start_matches('.').to_lowercase();
-    if s.is_empty() {
-        return Err("suffix cannot be empty".to_string());
+fn ensure_valid_suffix_in_store(state_store: &StateStore) -> Result<String, String> {
+    let mut cur = state_store.read().map_err(|e| e.to_string())?;
+    let normalized = domain_suffix::normalize_dns_zone(&cur.domain_suffix)
+        .unwrap_or_else(|_| "test".to_string());
+    let suffix = if domain_suffix::validate_dns_zone(&normalized).is_ok() {
+        normalized
+    } else {
+        "test".to_string()
+    };
+    if cur.domain_suffix != suffix {
+        cur.domain_suffix = suffix.clone();
+        state_store.write(&cur).map_err(|e| e.to_string())?;
     }
-    if s.len() > 63 {
-        return Err("suffix is too long".to_string());
-    }
-    let ok = s
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-    if !ok || s.starts_with('-') || s.ends_with('-') {
-        return Err("suffix must match [a-z0-9-] and not start/end with '-'".to_string());
-    }
-    Ok(s)
+    Ok(suffix)
 }
 
 #[tauri::command]
@@ -42,7 +42,10 @@ fn get_domain_suffix(state: tauri::State<'_, AppState>) -> Result<String, String
     state
         .state_store
         .read()
-        .map(|s| normalize_suffix(&s.domain_suffix).unwrap_or_else(|_| "test".to_string()))
+        .map(|s| {
+            domain_suffix::normalize_dns_zone(&s.domain_suffix)
+                .unwrap_or_else(|_| "test".to_string())
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -52,16 +55,23 @@ fn set_domain_suffix(
     state: tauri::State<'_, AppState>,
     suffix: String,
 ) -> Result<String, String> {
-    let suffix = normalize_suffix(&suffix)?;
+    let suffix = domain_suffix::normalize_dns_zone(&suffix)?;
+    domain_suffix::validate_dns_zone(&suffix)?;
     let mut cur = state.state_store.read().map_err(|e| e.to_string())?;
     cur.domain_suffix = suffix.clone();
     state.state_store.write(&cur).map_err(|e| e.to_string())?;
 
-    // Apply DNS routing for the new suffix immediately.
-    DnsmasqManager::setup_system(&suffix).map_err(|e| e.to_string())?;
+    sync_dns(&state)?;
     let _ = app.emit("ui:navigate", "settings");
 
     Ok(suffix)
+}
+
+pub(crate) fn sync_dns(state: &AppState) -> Result<(), String> {
+    let zone = ensure_valid_suffix_in_store(&state.state_store)?;
+    let projects = state.store.list_projects().map_err(|e| e.to_string())?;
+    let domains: Vec<String> = projects.iter().map(|p| p.domain.clone()).collect();
+    DnsmasqManager::setup_system(&zone, &domains).map_err(|e| e.to_string())
 }
 
 #[derive(Clone)]
@@ -126,6 +136,7 @@ fn add_project(
         .store
         .save_projects(&projects)
         .map_err(|e| e.to_string())?;
+    sync_dns(&state)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(project)
 }
@@ -154,6 +165,7 @@ fn remove_project(
         .map_err(|e| e.to_string())?;
 
     apply_caddy_config(&app, &state, &projects).map_err(|e| e.to_string())?;
+    sync_dns(&state)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(())
 }
@@ -166,12 +178,7 @@ fn start_project(
 ) -> Result<models::Project, String> {
     let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
 
-    let suffix = state
-        .state_store
-        .read()
-        .map(|s| s.domain_suffix)
-        .unwrap_or_else(|_| "test".to_string());
-    DnsmasqManager::setup_system(&suffix).map_err(|e| e.to_string())?;
+    sync_dns(&state)?;
 
     MkcertManager::install_local_ca(&app, &state.state_store).map_err(|e| e.to_string())?;
 
@@ -344,6 +351,7 @@ fn update_project(
         .store
         .save_projects(&projects)
         .map_err(|e| e.to_string())?;
+    sync_dns(&state)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(updated)
 }
@@ -384,13 +392,7 @@ pub fn run() {
 
             // Ensure wildcard `.test` resolution + local CA are ready up-front so domains
             // resolve immediately when opening a project in the browser.
-            let suffix = state
-                .state_store
-                .read()
-                .map(|s| s.domain_suffix)
-                .unwrap_or_else(|_| "test".to_string());
-            DnsmasqManager::setup_system(&suffix)
-                .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
+            sync_dns(&state).map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
             MkcertManager::install_local_ca(&handle, &state.state_store)
                 .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
 
