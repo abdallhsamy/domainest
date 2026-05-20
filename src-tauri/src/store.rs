@@ -24,6 +24,10 @@ impl Store {
         })
     }
 
+    pub fn from_path(path: PathBuf) -> Self {
+        Self { path }
+    }
+
     pub fn list_projects(&self) -> AppResult<Vec<Project>> {
         let parent = self.path.parent().ok_or_else(|| AppError::StoreCorrupted {
             path: self.path.clone(),

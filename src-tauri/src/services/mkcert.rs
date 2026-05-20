@@ -1,77 +1,40 @@
 use std::{fs, path::PathBuf};
 
-use tauri_plugin_shell::ShellExt;
-
 use crate::{
-    error::{AppError, AppResult},
+    error::AppResult,
     paths,
+    sidecar::{mkcert_path, run_mkcert, tool_output_ok},
     state_store::StateStore,
 };
 
 pub struct MkcertManager;
 
 impl MkcertManager {
-    pub fn ensure_available(app: &tauri::AppHandle) -> AppResult<()> {
-        // If the sidecar isn't present, this will error with a helpful message.
-        let _ = app
-            .shell()
-            .sidecar("mkcert")
-            .map_err(|_e| AppError::ToolMissing {
-                tool: "mkcert".to_string(),
-                help: "Bundled mkcert missing. Run `pnpm setup:mkcert`.".to_string(),
-            })?;
+    pub fn ensure_available() -> AppResult<()> {
+        let _ = mkcert_path()?;
         Ok(())
     }
 
-    fn install_local_ca_inner(app: &tauri::AppHandle) -> AppResult<()> {
-        Self::ensure_available(app)?;
-
-        let out = tauri::async_runtime::block_on(async move {
-            app.shell()
-                .sidecar("mkcert")
-                .map_err(|e| AppError::ToolFailed {
-                    tool: "mkcert".to_string(),
-                    message: e.to_string(),
-                })?
-                .args(["-install"])
-                .output()
-                .await
-                .map_err(|e| AppError::ToolFailed {
-                    tool: "mkcert -install".to_string(),
-                    message: e.to_string(),
-                })
-        })?;
-
-        if !out.status.success() {
-            return Err(AppError::ToolFailed {
-                tool: "mkcert -install".to_string(),
-                message: format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                )
-                .trim()
-                .to_string(),
-            });
-        }
-
-        Ok(())
+    fn install_local_ca_inner() -> AppResult<()> {
+        Self::ensure_available()?;
+        let out = run_mkcert(&["-install"])?;
+        tool_output_ok(&out, "mkcert -install")
     }
 
-    pub fn install_local_ca(app: &tauri::AppHandle, state_store: &StateStore) -> AppResult<()> {
+    pub fn install_local_ca(state_store: &StateStore) -> AppResult<()> {
         let mut state = state_store.read()?;
         if state.mkcert_installed {
             return Ok(());
         }
 
-        Self::install_local_ca_inner(app)?;
+        Self::install_local_ca_inner()?;
         state.mkcert_installed = true;
         state_store.write(&state)?;
         Ok(())
     }
 
-    pub fn ensure_cert(app: &tauri::AppHandle, domain: &str) -> AppResult<(PathBuf, PathBuf)> {
-        Self::ensure_available(app)?;
+    pub fn ensure_cert(domain: &str) -> AppResult<(PathBuf, PathBuf)> {
+        Self::ensure_available()?;
 
         let certs_dir = paths::certs_dir()?;
         fs::create_dir_all(&certs_dir)?;
@@ -83,43 +46,14 @@ impl MkcertManager {
             return Ok((cert_path, key_path));
         }
 
-        let cert_path2 = cert_path.clone();
-        let key_path2 = key_path.clone();
-        let domain2 = domain.to_string();
-        let out = tauri::async_runtime::block_on(async move {
-            app.shell()
-                .sidecar("mkcert")
-                .map_err(|e| AppError::ToolFailed {
-                    tool: "mkcert".to_string(),
-                    message: e.to_string(),
-                })?
-                .args([
-                    "-cert-file",
-                    cert_path2.to_string_lossy().as_ref(),
-                    "-key-file",
-                    key_path2.to_string_lossy().as_ref(),
-                    domain2.as_str(),
-                ])
-                .output()
-                .await
-                .map_err(|e| AppError::ToolFailed {
-                    tool: format!("mkcert {domain}"),
-                    message: e.to_string(),
-                })
-        })?;
-
-        if !out.status.success() {
-            return Err(AppError::ToolFailed {
-                tool: format!("mkcert {domain}"),
-                message: format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                )
-                .trim()
-                .to_string(),
-            });
-        }
+        let out = run_mkcert(&[
+            "-cert-file",
+            cert_path.to_string_lossy().as_ref(),
+            "-key-file",
+            key_path.to_string_lossy().as_ref(),
+            domain,
+        ])?;
+        tool_output_ok(&out, &format!("mkcert {domain}"))?;
 
         Ok((cert_path, key_path))
     }

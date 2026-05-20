@@ -1,17 +1,19 @@
 use std::{
     fs,
+    io::{BufRead, BufReader, Read},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
+    process::Child,
     sync::Mutex,
+    thread,
     time::{Duration, Instant},
 };
-
-use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 use crate::{
     error::{AppError, AppResult},
     models::Project,
     paths,
+    sidecar::{self, spawn_caddy, tool_output_ok},
 };
 
 const GENERATED_BEGIN: &str = "# --- BEGIN domainest managed ---";
@@ -19,7 +21,7 @@ const GENERATED_END: &str = "# --- END domainest managed ---";
 const ADMIN_ADDR: &str = "127.0.0.1:2019";
 
 pub struct CaddyManager {
-    running: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    running: Mutex<Option<Child>>,
 }
 
 impl CaddyManager {
@@ -54,7 +56,7 @@ impl CaddyManager {
         Ok(paths::caddy_dir()?.join("caddy.pid"))
     }
 
-    pub fn ensure_running(&self, app: &tauri::AppHandle, caddyfile: &PathBuf) -> AppResult<()> {
+    pub fn ensure_running(&self, caddyfile: &PathBuf) -> AppResult<()> {
         let mut guard = self.running.lock().unwrap();
         if guard.is_some() {
             return Ok(());
@@ -63,16 +65,8 @@ impl CaddyManager {
         let caddy_dir = paths::caddy_dir()?;
         fs::create_dir_all(&caddy_dir)?;
 
-        // Best-effort stop of any previously running Caddy on the default admin address.
-        // This prevents orphaned instances (from older versions without a pidfile) from continuing
-        // to serve stale config.
-        let _ = tauri::async_runtime::block_on(async {
-            if let Ok(cmd) = app.shell().sidecar("caddy") {
-                let _ = cmd.args(["stop", "--address", ADMIN_ADDR]).output().await;
-            }
-        });
+        let _ = sidecar::run_caddy(&["stop", "--address", ADMIN_ADDR]);
 
-        // If we have a previous pidfile, try to terminate that instance first.
         if let Ok(pidfile) = Self::pidfile_path() {
             if let Ok(pid_str) = fs::read_to_string(&pidfile) {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
@@ -82,101 +76,63 @@ impl CaddyManager {
                         use nix::unistd::Pid;
                         let _ = kill(Pid::from_raw(pid), nix::sys::signal::Signal::SIGTERM);
                     }
+                    #[cfg(not(unix))]
+                    let _ = pid;
                 }
             }
         }
 
-        let mut cmd = app
-            .shell()
-            .sidecar("caddy")
-            .map_err(|e| AppError::ToolFailed {
-                tool: "caddy".to_string(),
-                message: e.to_string(),
-            })?;
-        cmd = cmd.args([
-            "run",
-            "--config",
-            caddyfile.to_string_lossy().as_ref(),
-            "--adapter",
-            "caddyfile",
-            "--pidfile",
-            Self::pidfile_path()?.to_string_lossy().as_ref(),
-        ]);
-        cmd = cmd.env("CADDY_HOME", caddy_dir.to_string_lossy().as_ref());
-        cmd = cmd.env("XDG_DATA_HOME", caddy_dir.to_string_lossy().as_ref());
+        let pidfile = Self::pidfile_path()?;
+        let mut child = spawn_caddy(
+            &[
+                "run",
+                "--config",
+                caddyfile.to_string_lossy().as_ref(),
+                "--adapter",
+                "caddyfile",
+                "--pidfile",
+                pidfile.to_string_lossy().as_ref(),
+            ],
+            &[
+                ("CADDY_HOME", caddy_dir.to_string_lossy().as_ref()),
+                ("XDG_DATA_HOME", caddy_dir.to_string_lossy().as_ref()),
+            ],
+        )?;
 
-        let (mut rx, child) = cmd.spawn().map_err(|e| AppError::ToolFailed {
-            tool: "caddy".to_string(),
-            message: e.to_string(),
-        })?;
+        pipe_child_logs(child.stderr.take(), log::Level::Warn);
+        pipe_child_logs(child.stdout.take(), log::Level::Info);
 
         wait_for_admin_ready(ADMIN_ADDR, Duration::from_secs(3))?;
-
-        tauri::async_runtime::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Error(line) => {
-                        log::error!("caddy: {line}");
-                    }
-                    CommandEvent::Stderr(line) => {
-                        log::warn!("caddy: {}", String::from_utf8_lossy(&line));
-                    }
-                    CommandEvent::Stdout(line) => {
-                        log::info!("caddy: {}", String::from_utf8_lossy(&line));
-                    }
-                    _ => {}
-                }
-            }
-        });
 
         *guard = Some(child);
         Ok(())
     }
 
-    pub fn reload(&self, app: &tauri::AppHandle, caddyfile: &PathBuf) -> AppResult<()> {
-        let caddyfile = caddyfile.clone();
-        let out = tauri::async_runtime::block_on(async move {
-            app.shell()
-                .sidecar("caddy")
-                .map_err(|e| AppError::ToolFailed {
-                    tool: "caddy".to_string(),
-                    message: e.to_string(),
-                })?
-                .args([
-                    "reload",
-                    "--config",
-                    caddyfile.to_string_lossy().as_ref(),
-                    "--adapter",
-                    "caddyfile",
-                    "--address",
-                    ADMIN_ADDR,
-                ])
-                .output()
-                .await
-                .map_err(|e| AppError::ToolFailed {
-                    tool: "caddy reload".to_string(),
-                    message: e.to_string(),
-                })
-        })?;
-
-        if !out.status.success() {
-            return Err(AppError::ToolFailed {
-                tool: "caddy reload".to_string(),
-                message: format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                )
-                .trim()
-                .to_string(),
-            });
-        }
-
-        Ok(())
+    pub fn reload(&self, caddyfile: &PathBuf) -> AppResult<()> {
+        let out = sidecar::run_caddy(&[
+            "reload",
+            "--config",
+            caddyfile.to_string_lossy().as_ref(),
+            "--adapter",
+            "caddyfile",
+            "--address",
+            ADMIN_ADDR,
+        ])?;
+        tool_output_ok(&out, "caddy reload")
     }
 }
 
 pub type TlsPathLookup = dyn Fn(&str) -> Option<(PathBuf, PathBuf)> + Send + Sync;
+
+fn pipe_child_logs<R: Read + Send + 'static>(pipe: Option<R>, level: log::Level) {
+    let Some(pipe) = pipe else { return };
+    thread::spawn(move || {
+        let reader = BufReader::new(pipe);
+        for line in reader.lines().map_while(Result::ok) {
+            log::log!(level, "caddy: {line}");
+        }
+    });
+}
 
 fn wait_for_admin_ready(addr: &str, timeout: Duration) -> AppResult<()> {
     let addr: SocketAddr = addr.parse().map_err(|e| AppError::ToolFailed {

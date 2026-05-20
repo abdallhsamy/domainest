@@ -1,9 +1,12 @@
 mod app_state;
+pub mod cli;
+mod core;
 mod domain_suffix;
 mod error;
 mod models;
 mod paths;
 mod services;
+mod sidecar;
 mod state_store;
 mod store;
 mod tray;
@@ -12,41 +15,29 @@ use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
 
-use services::{
-    caddy::CaddyManager, dnsmasq::DnsmasqManager, mkcert::MkcertManager,
-    process_manager::ProcessManager,
-};
-use state_store::StateStore;
-use store::Store;
+use core::DomainestCore;
 use tauri_plugin_opener::OpenerExt;
-use uuid::Uuid;
 
-fn ensure_valid_suffix_in_store(state_store: &StateStore) -> Result<String, String> {
-    let mut cur = state_store.read().map_err(|e| e.to_string())?;
-    let normalized = domain_suffix::normalize_dns_zone(&cur.domain_suffix)
-        .unwrap_or_else(|_| "test".to_string());
-    let suffix = if domain_suffix::validate_dns_zone(&normalized).is_ok() {
-        normalized
-    } else {
-        "test".to_string()
-    };
-    if cur.domain_suffix != suffix {
-        cur.domain_suffix = suffix.clone();
-        state_store.write(&cur).map_err(|e| e.to_string())?;
+#[derive(Clone)]
+pub struct AppState {
+    pub core: Arc<DomainestCore>,
+}
+
+impl AppState {
+    fn from_core(core: DomainestCore) -> Self {
+        Self {
+            core: Arc::new(core),
+        }
     }
-    Ok(suffix)
+}
+
+fn map_err(e: crate::error::AppError) -> String {
+    e.to_string()
 }
 
 #[tauri::command]
 fn get_domain_suffix(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    state
-        .state_store
-        .read()
-        .map(|s| {
-            domain_suffix::normalize_dns_zone(&s.domain_suffix)
-                .unwrap_or_else(|_| "test".to_string())
-        })
-        .map_err(|e| e.to_string())
+    state.core.get_zone().map_err(map_err)
 }
 
 #[tauri::command]
@@ -55,36 +46,14 @@ fn set_domain_suffix(
     state: tauri::State<'_, AppState>,
     suffix: String,
 ) -> Result<String, String> {
-    let suffix = domain_suffix::normalize_dns_zone(&suffix)?;
-    domain_suffix::validate_dns_zone(&suffix)?;
-    let mut cur = state.state_store.read().map_err(|e| e.to_string())?;
-    cur.domain_suffix = suffix.clone();
-    state.state_store.write(&cur).map_err(|e| e.to_string())?;
-
-    sync_dns(&state)?;
+    let suffix = state.core.set_zone(&suffix).map_err(map_err)?;
     let _ = app.emit("ui:navigate", "settings");
-
     Ok(suffix)
-}
-
-pub(crate) fn sync_dns(state: &AppState) -> Result<(), String> {
-    let zone = ensure_valid_suffix_in_store(&state.state_store)?;
-    let projects = state.store.list_projects().map_err(|e| e.to_string())?;
-    let domains: Vec<String> = projects.iter().map(|p| p.domain.clone()).collect();
-    DnsmasqManager::setup_system(&zone, &domains).map_err(|e| e.to_string())
-}
-
-#[derive(Clone)]
-struct AppState {
-    store: Store,
-    process_manager: Arc<ProcessManager>,
-    caddy_manager: Arc<CaddyManager>,
-    state_store: StateStore,
 }
 
 #[tauri::command]
 fn list_projects(state: tauri::State<'_, AppState>) -> Result<Vec<models::Project>, String> {
-    state.store.list_projects().map_err(|e| e.to_string())
+    state.core.list_projects().map_err(map_err)
 }
 
 #[tauri::command]
@@ -93,50 +62,11 @@ fn add_project(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<models::Project, String> {
-    let name = std::path::Path::new(&path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("project")
-        .to_string();
-    let suffix = state
-        .state_store
-        .read()
-        .map(|s| s.domain_suffix)
-        .unwrap_or_else(|_| "test".to_string());
-    let suffix = suffix.trim_start_matches('.').to_lowercase();
-    let domain = format!("{name}.{suffix}");
-
-    let mut projects = state.store.list_projects().map_err(|e| e.to_string())?;
-    let used_ports = projects
-        .iter()
-        .map(|p| p.port)
-        .collect::<std::collections::HashSet<_>>();
-    let mut port: u16 = 3000;
-    while used_ports.contains(&port) {
-        port = port.saturating_add(1);
-        if port == u16::MAX {
-            return Err("no available port".to_string());
-        }
-    }
-    let project = models::Project {
-        id: Uuid::new_v4(),
-        name,
-        path,
-        domain,
-        port,
-        ssl: true,
-        status: models::ProjectStatus::Stopped,
-        command: "pnpm".to_string(),
-        args: vec!["dev".to_string()],
-        pid: None,
-    };
-
-    projects.push(project.clone());
-    state
-        .store
-        .save_projects(&projects)
-        .map_err(|e| e.to_string())?;
-    sync_dns(&state)?;
+    let project = state
+        .core
+        .add_project(path, core::AddProjectOptions::default())
+        .map_err(map_err)?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(project)
 }
@@ -147,25 +77,8 @@ fn remove_project(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    let mut projects = state.store.list_projects().map_err(|e| e.to_string())?;
-
-    if let Some(p) = projects.iter().find(|p| p.id == project_id).cloned() {
-        if p.status == models::ProjectStatus::Running {
-            let _ = state
-                .process_manager
-                .stop(project_id, std::time::Duration::from_secs(5));
-        }
-    }
-
-    projects.retain(|p| p.id != project_id);
-    state
-        .store
-        .save_projects(&projects)
-        .map_err(|e| e.to_string())?;
-
-    apply_caddy_config(&app, &state, &projects).map_err(|e| e.to_string())?;
-    sync_dns(&state)?;
+    state.core.remove_project(&id).map_err(map_err)?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(())
 }
@@ -176,43 +89,8 @@ fn start_project(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<models::Project, String> {
-    let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-
-    sync_dns(&state)?;
-
-    MkcertManager::install_local_ca(&app, &state.state_store).map_err(|e| e.to_string())?;
-
-    let mut projects = state.store.list_projects().map_err(|e| e.to_string())?;
-    let mut project = projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .cloned()
-        .ok_or_else(|| "project not found".to_string())?;
-
-    if project.ssl {
-        let _ = MkcertManager::ensure_cert(&app, &project.domain).map_err(|e| e.to_string())?;
-    }
-
-    let pid = state
-        .process_manager
-        .spawn_dev_server(&project)
-        .map_err(|e| e.to_string())?;
-
-    for p in projects.iter_mut() {
-        if p.id == project_id {
-            p.status = models::ProjectStatus::Running;
-            p.pid = Some(pid);
-            project = p.clone();
-            break;
-        }
-    }
-
-    state
-        .store
-        .save_projects(&projects)
-        .map_err(|e| e.to_string())?;
-
-    apply_caddy_config(&app, &state, &projects).map_err(|e| e.to_string())?;
+    let project = state.core.start_project(&id).map_err(map_err)?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(project)
 }
@@ -223,89 +101,22 @@ fn stop_project(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<models::Project, String> {
-    let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-
-    let mut projects = state.store.list_projects().map_err(|e| e.to_string())?;
-    let mut project = projects
-        .iter()
-        .find(|p| p.id == project_id)
-        .cloned()
-        .ok_or_else(|| "project not found".to_string())?;
-
-    // Stop the tracked child if present; if the app restarted and lost the child handle,
-    // fall back to killing by the last known pid.
-    if let Err(e) = state
-        .process_manager
-        .stop(project_id, std::time::Duration::from_secs(5))
-    {
-        if let Some(pid) = project.pid {
-            let _ = state
-                .process_manager
-                .stop_by_pid(pid, std::time::Duration::from_secs(5));
-        } else {
-            return Err(e.to_string());
-        }
-    }
-
-    for p in projects.iter_mut() {
-        if p.id == project_id {
-            p.status = models::ProjectStatus::Stopped;
-            p.pid = None;
-            project = p.clone();
-            break;
-        }
-    }
-
-    state
-        .store
-        .save_projects(&projects)
-        .map_err(|e| e.to_string())?;
-
-    apply_caddy_config(&app, &state, &projects).map_err(|e| e.to_string())?;
+    let project = state.core.stop_project(&id).map_err(map_err)?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(project)
 }
 
 #[tauri::command]
 fn read_project_log(
-    _state: tauri::State<'_, AppState>,
+    state: tauri::State<'_, AppState>,
     id: String,
     max_bytes: Option<u64>,
 ) -> Result<String, String> {
-    let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    let log_path = paths::logs_dir()
-        .map_err(|e| e.to_string())?
-        .join(format!("{project_id}.log"));
-    let max = max_bytes.unwrap_or(80_000).min(500_000);
-    let data = std::fs::read(&log_path).unwrap_or_default();
-    if (data.len() as u64) <= max {
-        return Ok(String::from_utf8_lossy(&data).to_string());
-    }
-    let start = (data.len() as u64 - max) as usize;
-    Ok(String::from_utf8_lossy(&data[start..]).to_string())
-}
-
-fn apply_caddy_config(
-    app: &tauri::AppHandle,
-    state: &tauri::State<'_, AppState>,
-    projects: &[models::Project],
-) -> Result<(), crate::error::AppError> {
-    let caddyfile = state
-        .caddy_manager
-        .write_managed_caddyfile(projects, &|domain| {
-            let certs_dir = paths::certs_dir().ok()?;
-            let cert = certs_dir.join(format!("{domain}.pem"));
-            let key = certs_dir.join(format!("{domain}-key.pem"));
-            if cert.exists() && key.exists() {
-                Some((cert, key))
-            } else {
-                None
-            }
-        })?;
-
-    state.caddy_manager.ensure_running(app, &caddyfile)?;
-    state.caddy_manager.reload(app, &caddyfile)?;
-    Ok(())
+    state
+        .core
+        .read_log(&id, max_bytes.unwrap_or(80_000))
+        .map_err(map_err)
 }
 
 #[tauri::command]
@@ -314,19 +125,16 @@ fn open_project(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
-    let project_id = Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    let projects = state.store.list_projects().map_err(|e| e.to_string())?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let p = projects
         .iter()
-        .find(|p| p.id == project_id)
+        .find(|p| p.id.to_string() == id)
         .ok_or_else(|| "project not found".to_string())?;
-
     let scheme = if p.ssl { "https" } else { "http" };
     let url = format!("{scheme}://{}", p.domain);
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -335,23 +143,8 @@ fn update_project(
     state: tauri::State<'_, AppState>,
     project: models::Project,
 ) -> Result<models::Project, String> {
-    let mut projects = state.store.list_projects().map_err(|e| e.to_string())?;
-
-    let mut updated = None;
-    for p in projects.iter_mut() {
-        if p.id == project.id {
-            *p = project.clone();
-            updated = Some(p.clone());
-            break;
-        }
-    }
-
-    let updated = updated.ok_or_else(|| "project not found".to_string())?;
-    state
-        .store
-        .save_projects(&projects)
-        .map_err(|e| e.to_string())?;
-    sync_dns(&state)?;
+    let updated = state.core.update_project(project).map_err(map_err)?;
+    let projects = state.core.list_projects().map_err(map_err)?;
     let _ = tray::refresh_tray(&app, &projects);
     Ok(updated)
 }
@@ -371,55 +164,19 @@ pub fn run() {
                 )?;
             }
 
-            let store = Store::new().map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-            app.manage(AppState {
-                store,
-                process_manager: Arc::new(ProcessManager::new()),
-                caddy_manager: Arc::new(CaddyManager::new()),
-                state_store: StateStore::new()
-                    .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?,
-            });
+            let core =
+                DomainestCore::new().map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
+            app.manage(AppState::from_core(core));
 
             let state = app.state::<AppState>();
-            reconcile_projects_on_start(&state.store)
+            state
+                .core
+                .bootstrap()
                 .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
+
             let projects = state
-                .store
+                .core
                 .list_projects()
-                .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-
-            let handle = app.handle();
-
-            // Ensure wildcard `.test` resolution + local CA are ready up-front so domains
-            // resolve immediately when opening a project in the browser.
-            sync_dns(&state).map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-            MkcertManager::install_local_ca(&handle, &state.state_store)
-                .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-
-            // Always rewrite managed Caddy config on startup to avoid stale domains
-            // lingering after project removal or crashes.
-            let caddyfile = state
-                .caddy_manager
-                .write_managed_caddyfile(&projects, &|domain| {
-                    let certs_dir = paths::certs_dir().ok()?;
-                    let cert = certs_dir.join(format!("{domain}.pem"));
-                    let key = certs_dir.join(format!("{domain}-key.pem"));
-                    if cert.exists() && key.exists() {
-                        Some((cert, key))
-                    } else {
-                        None
-                    }
-                })
-                .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-            // Start caddy even when there are 0 projects so we can immediately apply
-            // removals (and so opening projects later is fast).
-            state
-                .caddy_manager
-                .ensure_running(&handle, &caddyfile)
-                .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
-            state
-                .caddy_manager
-                .reload(&handle, &caddyfile)
                 .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!(e)))?;
 
             tray::init_tray(app, &projects)?;
@@ -439,45 +196,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-fn reconcile_projects_on_start(store: &Store) -> Result<(), crate::error::AppError> {
-    let mut projects = store.list_projects()?;
-    let mut changed = false;
-
-    for p in projects.iter_mut() {
-        if p.status == models::ProjectStatus::Running {
-            let alive = p.pid.and_then(|pid| is_pid_alive(pid)).unwrap_or(false);
-            if !alive {
-                p.status = models::ProjectStatus::Stopped;
-                p.pid = None;
-                changed = true;
-            }
-        }
-    }
-
-    if changed {
-        store.save_projects(&projects)?;
-    }
-    Ok(())
-}
-
-fn is_pid_alive(pid: u32) -> Option<bool> {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::kill;
-        use nix::unistd::Pid;
-        let p = Pid::from_raw(pid as i32);
-        match kill(p, None) {
-            Ok(()) => Some(true),
-            Err(nix::errno::Errno::ESRCH) => Some(false),
-            Err(_) => Some(false),
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        None
-    }
 }

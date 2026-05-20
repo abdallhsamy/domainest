@@ -76,6 +76,68 @@ pnpm tauri:dev
 pnpm tauri:build
 ```
 
+## CLI (headless)
+
+Domainest ships a separate **`domainest`** binary with the same project/DNS/Caddy/mkcert behavior as the GUI (no window).
+
+Build or run from the repo:
+
+```bash
+pnpm setup:deps   # required once (bundled caddy + mkcert)
+cargo build --manifest-path src-tauri/Cargo.toml --bin domainest
+./src-tauri/target/debug/domainest --help
+```
+
+Dev shortcut:
+
+```bash
+pnpm domainest -- list
+pnpm domainest -- start be-brand
+pnpm domainest -- zone get
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `list [--json]` | List projects |
+| `add <path> [--domain] [--port] [--no-ssl]` | Add a project |
+| `start <project>` | Start dev server + proxy |
+| `stop <project>` | Stop dev server |
+| `remove <project> -y` | Remove project |
+| `open <project>` | Open URL in browser |
+| `logs <project> [--bytes N] [--follow]` | Tail project log |
+| `status [--json]` | Zone + project summary |
+| `zone get` / `zone set <zone>` | DNS zone (e.g. `test`, `myapp.com`) |
+| `dns sync` | Re-apply macOS resolvers + embedded DNS |
+
+`<project>` is a **name**, **UUID**, or **UUID prefix**.
+
+### GUI vs CLI
+
+- Both use `~/.domainest/` (same `projects.json`).
+- Run **only one** instance that owns Caddy admin (`127.0.0.1:2019`) — starting both GUI and CLI `start` at once can cause port conflicts.
+- `dns sync` on macOS may prompt for admin (resolver files under `/etc/resolver/`).
+
+Optional: `DOMAINEST_BIN_DIR` — directory containing `caddy-<target-triple>` and `mkcert-<target-triple>` if not next to the binary.
+
+### CLI and DNS (important)
+
+Each `domainest` CLI command is a **short-lived process**. When it exits, the **embedded DNS server** on `127.0.0.1:53535` stops with it. macOS resolver files under `/etc/resolver/` remain, but nothing answers on port 53535 until something starts DNS again.
+
+| Situation | What works |
+|-----------|------------|
+| **Menu-bar app running** | CLI can `list`, `add`, `stop`, etc. DNS and Caddy are already up. Best mix of GUI + scripting. |
+| **CLI only** (no GUI) | `start` / `dns sync` bring DNS up **for that command**, then it stops when the command finishes. Custom domains may not resolve right after unless you keep a process alive. |
+| **Verify DNS** | While a command is running, or while the GUI is open: `dig +short myapp.test @127.0.0.1 -p 53535` should return `127.0.0.1`. |
+
+**Practical workflows:**
+
+1. **Scripting with live domains** — leave Domainest open in the menu bar, then use the CLI for `start` / `stop` / `list`.
+2. **CLI-only** — run `domainest start <project>`; the dev server keeps running after the CLI exits, but for reliable `*.test` / per-project DNS you still need either the GUI running or run `domainest dns sync` before browsing (DNS only lasts while that command runs).
+
+Caddy is started as a background child and can keep running after a CLI `start`/`stop` exits; DNS does not (v1 has no separate DNS daemon).
+
 ## Usage
 
 ### Add a project
