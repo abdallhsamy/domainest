@@ -44,5 +44,5 @@ anyhow = "1"
 nix = { version = "0.29", features = ["signal", "process"] }
 libc = "0.2"
 tokio = { version = "1.45", features = ["net", "rt", "macros", "time"] }
-hickory-proto = "0.24"
+hickory-proto = "0.26"
 clap = { version = "4", features = ["derive"] }
