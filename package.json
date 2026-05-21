@@ -12,7 +12,8 @@
     "setup:deps": "pnpm setup:caddy && pnpm setup:mkcert",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "domainest": "cargo run --manifest-path src-tauri/Cargo.toml --bin domainest --"
   },
   "dependencies": {
     "@tauri-apps/plugin-opener": "^2.5.4",

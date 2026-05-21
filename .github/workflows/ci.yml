@@ -81,6 +81,15 @@ jobs:
       - name: cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast
 
+      - name: Build domainest CLI
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin domainest
+
+      - name: domainest CLI smoke
+        run: |
+          ./src-tauri/target/debug/domainest --help
+          ./src-tauri/target/debug/domainest list
+          ./src-tauri/target/debug/domainest zone get
+
   tauri-linux:
     name: Tauri bundle (Linux .deb sanity)
     runs-on: ubuntu-22.04

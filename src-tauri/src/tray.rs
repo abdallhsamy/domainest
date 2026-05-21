@@ -6,9 +6,8 @@ use tauri::{
 use uuid::Uuid;
 
 use crate::models::Project;
-use crate::{paths, services::mkcert::MkcertManager, AppState};
+use crate::AppState;
 use tauri::Emitter;
-use tauri_plugin_opener::OpenerExt;
 
 const TRAY_ID: &str = "domainest-tray";
 
@@ -134,69 +133,19 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 
 fn tray_open_project(app: &AppHandle, project_id: Uuid) {
     let state = app.state::<AppState>();
-    let projects = match state.store.list_projects() {
-        Ok(p) => p,
-        Err(_) => return,
-    };
-    let Some(p) = projects.iter().find(|p| p.id == project_id) else {
-        return;
-    };
-    let scheme = if p.ssl { "https" } else { "http" };
-    let url = format!("{scheme}://{}", p.domain);
-    let _ = app.opener().open_url(url, None::<&str>);
+    let _ = state.core.open_project(&project_id.to_string());
 }
 
 fn tray_start_project(app: &AppHandle, project_id: Uuid) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let _ = crate::sync_dns(&state);
-        let _ = MkcertManager::install_local_ca(&app, &state.state_store);
-
-        let mut projects = match state.store.list_projects() {
+        let id = project_id.to_string();
+        let _ = state.core.start_project(&id);
+        let projects = match state.core.list_projects() {
             Ok(p) => p,
             Err(_) => return,
         };
-        let project = match projects.iter().find(|p| p.id == project_id).cloned() {
-            Some(p) => p,
-            None => return,
-        };
-
-        if project.ssl {
-            let _ = MkcertManager::ensure_cert(&app, &project.domain);
-        }
-
-        let pid = match state.process_manager.spawn_dev_server(&project) {
-            Ok(pid) => pid,
-            Err(_) => return,
-        };
-
-        for p in projects.iter_mut() {
-            if p.id == project_id {
-                p.status = crate::models::ProjectStatus::Running;
-                p.pid = Some(pid);
-            }
-        }
-        let _ = state.store.save_projects(&projects);
-
-        let _ = state
-            .caddy_manager
-            .write_managed_caddyfile(&projects, &|domain| {
-                let certs_dir = paths::certs_dir().ok()?;
-                let cert = certs_dir.join(format!("{domain}.pem"));
-                let key = certs_dir.join(format!("{domain}-key.pem"));
-                if cert.exists() && key.exists() {
-                    Some((cert, key))
-                } else {
-                    None
-                }
-            })
-            .and_then(|caddyfile| {
-                state.caddy_manager.ensure_running(&app, &caddyfile)?;
-                state.caddy_manager.reload(&app, &caddyfile)?;
-                Ok(())
-            });
-
         let _ = refresh_tray(&app, &projects);
     });
 }
@@ -205,40 +154,12 @@ fn tray_stop_project(app: &AppHandle, project_id: Uuid) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
-        let _ = state
-            .process_manager
-            .stop(project_id, std::time::Duration::from_secs(5));
-
-        let mut projects = match state.store.list_projects() {
+        let id = project_id.to_string();
+        let _ = state.core.stop_project(&id);
+        let projects = match state.core.list_projects() {
             Ok(p) => p,
             Err(_) => return,
         };
-        for p in projects.iter_mut() {
-            if p.id == project_id {
-                p.status = crate::models::ProjectStatus::Stopped;
-                p.pid = None;
-            }
-        }
-        let _ = state.store.save_projects(&projects);
-
-        let _ = state
-            .caddy_manager
-            .write_managed_caddyfile(&projects, &|domain| {
-                let certs_dir = paths::certs_dir().ok()?;
-                let cert = certs_dir.join(format!("{domain}.pem"));
-                let key = certs_dir.join(format!("{domain}-key.pem"));
-                if cert.exists() && key.exists() {
-                    Some((cert, key))
-                } else {
-                    None
-                }
-            })
-            .and_then(|caddyfile| {
-                state.caddy_manager.ensure_running(&app, &caddyfile)?;
-                state.caddy_manager.reload(&app, &caddyfile)?;
-                Ok(())
-            });
-
         let _ = refresh_tray(&app, &projects);
     });
 }
