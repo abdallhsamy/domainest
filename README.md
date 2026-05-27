@@ -2,6 +2,15 @@
 
 # Domainest
 
+[![Build Status](https://github.com/abdallhsamy/domainest/actions/workflows/ci.yml/badge.svg)](https://github.com/abdallhsamy/domainest/actions/workflows/ci.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/abdallhsamy/domainest)](https://github.com/abdallhsamy/domainest/releases)
+[![Status](https://img.shields.io/badge/status-in%20development-orange.svg)](https://github.com/abdallhsamy/domainest)
+[![macOS](https://img.shields.io/badge/OS-macOS-lightgrey.svg?logo=apple)](https://github.com/abdallhsamy/domainest)
+[![Rust](https://img.shields.io/badge/built%20with-Rust-black.svg?logo=rust)](https://www.rust-lang.org/)
+[![Tauri](https://img.shields.io/badge/built%20with-Tauri-blue.svg?logo=tauri)](https://tauri.app/)
+[![Vue.js](https://img.shields.io/badge/built%20with-Vue.js-4FC08D.svg?logo=vue.js)](https://vuejs.org/)
+
+
 Domainest is a tray/menu-bar dev tool that replaces “`pnpm dev` + localhost” with **human-friendly local domains**, e.g.:
 
 - `https://myapp.test`
@@ -247,4 +256,18 @@ Domainest rewrites the managed block in `~/.domainest/Caddyfile` and reloads Cad
 - `src-tauri/`: Rust backend + sidecars
   - `src-tauri/src/services/`: process manager, Caddy manager, mkcert manager, DNS server
 
+## Health
 
+The "Build Status" badge at the top of this `README.md` file shows the status of the latest build. If the badge is green, it means that the latest build was successful. If it's red, it means that the latest build failed.
+
+## Versioning
+
+This project follows [Semantic Versioning](https://semver.org/). The "Version" badge at the top of this `README.md` file shows the current version of the project.
+
+## Status
+
+The "Status" badge at the top of this `README.md` file shows the current status of the project. The following statuses are possible:
+
+- **in development**: The project is in active development and may not be stable.
+- **stable**: The project is stable and can be used in production.
+- **deprecated**: The project is no longer maintained and should not be used.
